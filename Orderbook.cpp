@@ -23,6 +23,18 @@
 #include <tuple>
 #include <format>
 
+enum class OrderType
+{
+    GoodTllCancelled,
+    FillAndKill
+};
+
+enum class Side
+{
+    Buy,
+    Sell
+};
+
 int main()
 {
 
