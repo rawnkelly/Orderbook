@@ -22,6 +22,8 @@
 #include <optional>
 #include <tuple>
 #include <format>
+#include <chrono>
+#include <random>
 
 enum class OrderType
 {
@@ -86,7 +88,11 @@ public:
     bool IsFilled() const { return GetRemainingQuantity() == 0; }
     void Fill(Quantity quantity)
     {
-
+        if (quantity > remainingQuantity_)
+        {
+            throw std::logic_error("Fill quantity is larger than remaining quantity.");
+        }
+        remainingQuantity_ -= quantity;
     }
 
 private:
@@ -197,8 +203,11 @@ private:
             if (bids_.empty() || asks_.empty())
             break;
 
-            auto& [bidPrice, bids] = *bids_.begin();
-            auto& [askPrice, asks] = *asks_.begin();
+            auto bid_iter = bids_.begin();
+            auto ask_iter = asks_.begin();
+
+            auto& [bidPrice, bids] = *bid_iter;
+            auto& [askPrice, asks] = *ask_iter;
 
             if (bidPrice < askPrice)
             break;
@@ -213,6 +222,11 @@ private:
                 bid->Fill(quantity);
                 ask->Fill(quantity);
 
+                trades.push_back(Trade{
+                    TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity },
+                    TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity }
+                });
+
                 if (bid->IsFilled())
                 {
                     bids.pop_front();
@@ -224,18 +238,13 @@ private:
                     asks.pop_front();
                     orders_.erase(ask->GetOrderId());
                 }
-
-                if (bids.empty())
-                   bids_.erase(bidPrice);
-
-                 if (asks.empty())
-                   asks_.erase(askPrice);
-
-                trades.push_back(Trade{
-                    TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity },
-                    TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity }
-                });
             }
+
+            if (bids.empty())
+                bids_.erase(bidPrice);
+
+            if (asks.empty())
+                asks_.erase(askPrice);
         }
 
         if (!bids_.empty())
@@ -261,11 +270,11 @@ public:
 
     Trades AddOrder(OrderPointer order)
     {
-        if (orders_.contains(order->GetOrderId()))
-        return { };
+        if (orders_.count(order->GetOrderId()) > 0)
+            return {};
 
         if (order->GetOrderType() == OrderType::FillAndKill && !CanMatch(order->GetSide(), order->GetPrice()))
-        return { };
+            return {};
 
         OrderPointers::iterator iterator;
 
@@ -273,24 +282,22 @@ public:
         {
             auto& orders = bids_[order->GetPrice()];
             orders.push_back(order);
-            iterator = std::next(orders.begin(), orders.size() - 1);
-
+            iterator = std::prev(orders.end());
         }
         else
         {
             auto& orders = asks_[order->GetPrice()];
             orders.push_back(order);
-            iterator = std::next(orders.begin(), orders.size() - 1);
+            iterator = std::prev(orders.end());
         }
 
-        orders_.insert({order->GetOrderId(), OrderEntry{ order, iterator } });
+        orders_.insert({order->GetOrderId(), OrderEntry{order, iterator}});
         return MatchOrders();
-
     }
 
     void CancelOrder(OrderId orderId)
     {
-        if (!orders_.contains(orderId))
+        if (orders_.count(orderId) == 0)
             return;
 
         const auto& [order, iterator] = orders_.at(orderId);
@@ -304,7 +311,7 @@ public:
             if (orders.empty())
                 asks_.erase(price);
         }
-        else 
+        else
         {
             auto price = order->GetPrice();
             auto& orders = bids_.at(price);
@@ -316,49 +323,91 @@ public:
         }
     }
 
-    Trades MatchOrder(OrderModify order)
+    Trades ModifyOrder(OrderModify order)
     {
-        if (!orders_.contains(order.GetOrderId()))
-            return { };
+        if (orders_.count(order.GetOrderId()) == 0)
+            return {};
 
         const auto& [existingOrder, _] = orders_.at(order.GetOrderId());
         CancelOrder(order.GetOrderId());
         return AddOrder(order.ToOrderPointer(existingOrder->GetOrderType()));
     }
 
-    std::size_t Size() const { return orders_.size(); }
-
     OrderbookLevelInfos GetOrderInfos() const
     {
         LevelInfos bidInfos, askInfos;
-        bidInfos.reserve(orders_.size());
-        askInfos.reserve(orders_.size());
+        bidInfos.reserve(bids_.size());
+        askInfos.reserve(asks_.size());
 
         auto CreateLevelInfos = [](Price price, const OrderPointers& orders)
         {
             return LevelInfo { price, std::accumulate(orders.begin(), orders.end(),(Quantity)0,
-            [](std::size_t runningSum, const OrderPointer& order)
+            [](Quantity runningSum, const OrderPointer& order)
             { return runningSum + order->GetRemainingQuantity(); }) };
 
         };
 
         for (const auto& [price, orders] : bids_)
-                        bidInfos.push_back(CreateLevelInfos(price, orders));
+            bidInfos.push_back(CreateLevelInfos(price, orders));
 
          for (const auto& [price, orders] : asks_)
-                        askInfos.push_back(CreateLevelInfos(price, orders));
+            askInfos.push_back(CreateLevelInfos(price, orders));
 
         return OrderbookLevelInfos { bidInfos, askInfos };
     }
 };
 
+// --- Test Harness ---
 
+// Generates a random order
+OrderPointer GenerateRandomOrder(OrderId& currentOrderId) {
+    static std::mt19937 rng(std::time(nullptr));
+    std::uniform_int_distribution<int> side_dist(0, 1);
+    std::uniform_int_distribution<Price> price_dist(90, 110);
+    std::uniform_int_distribution<Quantity> quantity_dist(1, 100);
 
+    Side side = side_dist(rng) == 0 ? Side::Buy : Side::Sell;
+    Price price = price_dist(rng);
+    Quantity quantity = quantity_dist(rng);
 
+    return std::make_shared<Order>(
+        OrderType::GoodTllCancelled,
+        currentOrderId++,
+        side,
+        price,
+        quantity
+    );
+}
 
 int main()
 {
+    Orderbook orderbook;
+    OrderId orderId = 1;
+    long long total_trades = 0;
+    const int test_duration_seconds = 60;
+
+    std::cout << "Starting orderbook performance test for " << test_duration_seconds << " seconds..." << std::endl;
+
+    auto start_time = std::chrono::steady_clock::now();
+    auto end_time = start_time + std::chrono::seconds(test_duration_seconds);
+
+    while (std::chrono::steady_clock::now() < end_time)
+    {
+        OrderPointer order = GenerateRandomOrder(orderId);
+        Trades trades = orderbook.AddOrder(order);
+        total_trades += trades.size();
+    }
+
+    auto actual_duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time);
+    double duration_sec = actual_duration.count() / 1000.0;
+    double trades_per_second = total_trades / duration_sec;
+
+    std::cout << "Test finished." << std::endl;
+    std::cout << "--------------------------------" << std::endl;
+    std::cout << "Total trades processed: " << total_trades << std::endl;
+    std::cout << "Total duration: " << duration_sec << " seconds" << std::endl;
+    std::cout << "Transactions per second: " << trades_per_second << std::endl;
+    std::cout << "--------------------------------" << std::endl;
 
     return 0;
-
-};
+}
