@@ -1,39 +1,55 @@
 # Orderbook
 
-C++ Order Book Implementation
+Implementation
 
-A low-latency limit order book implementation in modern C++20. Designed to handle high-throughput market data processing while maintaining clean, efficient code structure.
+A limit order book implementation in modern C++ that supports GoodTillCancelled (GTC) and FillAndKill (FAK) orders. Maintains price-time priority matching with efficient order management.
 
 Architecture
 
-The order book maintains separate buy and sell sides using price-time priority. Each price level tracks limit orders in arrival sequence. Core operations include order placement, execution, and cancellation.
+The order book uses separate maps for bid and ask sides, with price-time priority enforced through ordered containers. Core features include:
 
-Key design choices:
-- STL containers optimized for frequent insertion/deletion
-- Memory pool allocation for order objects
-- Minimal string operations in critical paths
-- Price-level indexing for O(1) best bid/ask lookup
+- Order matching with price-time priority
+- Support for GTC and FAK orders
+- Order modification and cancellation
+- Market depth tracking
 
-Build Requirements
+Implementation Details
 
-- C++20 or later
-- CMake 3.15+
-- Google Test (for unit tests)
+Key components:
+- `std::map` with custom comparators for bid/ask price ordering
+- `std::list` for order queues ensuring iterator stability
+- `std::shared_ptr` for automated memory management
+- Price level aggregation for market data
 
-## Building
+Data Structures
 
-```bash
-mkdir build && cd build
-cmake ..
-make
+- Bids: `std::map<Price, OrderPointers, std::greater<Price>>`
+- Asks: `std::map<Price, OrderPointers, std::less<Price>>`
+- Order tracking: `std::unordered_map<OrderId, OrderEntry>`
+
+Features
+
+- Order lifecycle management (add/modify/cancel)
+- Immediate-or-cancel behavior for FAK orders
+- Level-based market data access
+- Automatic order queue cleanup
+
+Usage Example
+
+```cpp
+OrderPointer order = std::make_shared<Order>(
+    OrderType::GoodTillCancelled,
+    orderId,
+    Side::Buy,
+    price,
+    quantity
+);
+orderbook.AddOrder(order);
 ```
 
-## Testing
+Requirements
 
-```bash
-./test/orderbook_test
-```
+- C++17 or later compiler
+- Standard Template Library
 
-## Performance
-
-Targets sub-microsecond latency for core operations with minimum allocation in critical paths. Benchmark results will be added as development progresses.
+The implementation focuses on clean code structure while maintaining efficient order processing through careful container selection and memory management.
