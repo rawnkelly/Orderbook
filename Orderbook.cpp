@@ -87,7 +87,7 @@ public:
     Quantity GetFilledQuantity() const { return GetInitialQuantity() - GetRemainingQuantity(); }
     bool IsFilled() const { return GetRemainingQuantity() == 0; }
 
-    // BUG FIX: Implemented the Fill method to correctly update remaining quantity.
+    // Implemented the Fill method to correctly update remaining quantity.
     void Fill(Quantity quantity)
     {
         if (quantity > remainingQuantity_)
@@ -200,7 +200,7 @@ private:
         Trades trades;
         trades.reserve(orders_.size());
 
-        // More robust loop condition to prevent iterator invalidation issues.
+        // Robust loop condition to prevent iterator invalidation issues.
         while (!bids_.empty() && !asks_.empty() && bids_.begin()->first >= asks_.begin()->first)
         {
             auto bid_level_iter = bids_.begin();
@@ -237,7 +237,7 @@ private:
                 }
             }
 
-            // Safely erase the entire price level if its order list is now empty.
+            // Erase the entire price level if its order list is now empty.
             if (bids.empty())
             {
                 bids_.erase(bid_level_iter);
@@ -249,7 +249,7 @@ private:
             }
         }
 
-        // The Fill-And-Kill logic from the original file remains, with safety checks.
+        // The Fill-And-Kill logic with safety checks.
         if (!bids_.empty())
         {
             auto& [price, bids] = *bids_.begin();
